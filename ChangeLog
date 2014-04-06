@@ -1,3 +1,12 @@
+2014-04-05  Jean-Paul Calderone  <exarkun@twistedmatrix.com>
+
+	* OpenSSL/test/test_ssl.py: Add a test for the behavior of
+	  Connection.shutdown when the send BIO is non-blocking and its
+	  buffer is full.
+	* OpenSSL/SSL.py: Fix the newly added test so that
+	  Connection.shutdown raises WantWriteError instead of an empty
+	  Error.
+
 2014-03-30  Fedor Brunner  <fedor.brunner@azet.sk>
 
 	* OpenSSL/SSL.py: Add ``get_finished``, ``get_peer_finished``

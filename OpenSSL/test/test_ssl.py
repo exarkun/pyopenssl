@@ -277,6 +277,18 @@ class _LoopbackMixin:
                         write.bio_write(dirty)
 
 
+    def _handshakeInMemory(self, client_conn, server_conn):
+        client_conn.set_connect_state()
+        server_conn.set_accept_state()
+
+        for conn in [client_conn, server_conn]:
+            try:
+                conn.do_handshake()
+            except WantReadError:
+                pass
+
+        self._interactInMemory(client_conn, server_conn)
+
 
 class VersionTests(TestCase):
     """
@@ -1622,34 +1634,6 @@ class ConnectionTests(TestCase, _LoopbackMixin):
         self.assertEquals(address, clientSSL.getsockname())
 
 
-    def test_shutdown_wrong_args(self):
-        """
-        :py:obj:`Connection.shutdown` raises :py:obj:`TypeError` if called with the wrong
-        number of arguments or with arguments other than integers.
-        """
-        connection = Connection(Context(TLSv1_METHOD), None)
-        self.assertRaises(TypeError, connection.shutdown, None)
-        self.assertRaises(TypeError, connection.get_shutdown, None)
-        self.assertRaises(TypeError, connection.set_shutdown)
-        self.assertRaises(TypeError, connection.set_shutdown, None)
-        self.assertRaises(TypeError, connection.set_shutdown, 0, 1)
-
-
-    def test_shutdown(self):
-        """
-        :py:obj:`Connection.shutdown` performs an SSL-level connection shutdown.
-        """
-        server, client = self._loopback()
-        self.assertFalse(server.shutdown())
-        self.assertEquals(server.get_shutdown(), SENT_SHUTDOWN)
-        self.assertRaises(ZeroReturnError, client.recv, 1024)
-        self.assertEquals(client.get_shutdown(), RECEIVED_SHUTDOWN)
-        client.shutdown()
-        self.assertEquals(client.get_shutdown(), SENT_SHUTDOWN|RECEIVED_SHUTDOWN)
-        self.assertRaises(ZeroReturnError, server.recv, 1024)
-        self.assertEquals(server.get_shutdown(), SENT_SHUTDOWN|RECEIVED_SHUTDOWN)
-
-
     def test_set_shutdown(self):
         """
         :py:obj:`Connection.set_shutdown` sets the state of the SSL connection shutdown
@@ -2863,6 +2847,82 @@ class InfoConstantTests(TestCase):
             SSL_CB_HANDSHAKE_START, SSL_CB_HANDSHAKE_DONE]:
 
             self.assertTrue(isinstance(const, int))
+
+
+
+class ShutdownTests(TestCase, _LoopbackMixin):
+    """
+    Unit tests for :py:obj:`OpenSSL.SSL.Connection.shutdown`.
+    """
+    def test_wrong_args(self):
+        """
+        :py:obj:`Connection.shutdown` raises :py:obj:`TypeError` if called with the wrong
+        number of arguments or with arguments other than integers.
+        """
+        connection = Connection(Context(TLSv1_METHOD), None)
+        self.assertRaises(TypeError, connection.shutdown, None)
+        self.assertRaises(TypeError, connection.get_shutdown, None)
+        self.assertRaises(TypeError, connection.set_shutdown)
+        self.assertRaises(TypeError, connection.set_shutdown, None)
+        self.assertRaises(TypeError, connection.set_shutdown, 0, 1)
+
+
+    def test_shutdown(self):
+        """
+        :py:obj:`Connection.shutdown` performs an SSL-level connection shutdown.
+        """
+        server, client = self._loopback()
+        self.assertFalse(server.shutdown())
+        self.assertEquals(server.get_shutdown(), SENT_SHUTDOWN)
+        self.assertRaises(ZeroReturnError, client.recv, 1024)
+        self.assertEquals(client.get_shutdown(), RECEIVED_SHUTDOWN)
+        client.shutdown()
+        self.assertEquals(client.get_shutdown(), SENT_SHUTDOWN|RECEIVED_SHUTDOWN)
+        self.assertRaises(ZeroReturnError, server.recv, 1024)
+        self.assertEquals(server.get_shutdown(), SENT_SHUTDOWN|RECEIVED_SHUTDOWN)
+
+
+    def test_wantwrite(self):
+        """
+        :py:obj:`Connection.shutdown` raises :py:obj:`WantWriteError` if the
+        full shutdown message can't be written to the transport (for example,
+        because the transport is a memory BIO that is full).
+        """
+        server_context = Context(TLSv1_METHOD)
+        server_context.use_privatekey(
+            load_privatekey(FILETYPE_PEM, cleartextPrivateKeyPEM))
+        server_context.use_certificate(
+            load_certificate(FILETYPE_PEM, cleartextCertificatePEM))
+        server_connection = Connection(server_context, None)
+
+        client_context = Context(TLSv1_METHOD)
+        client_connection = Connection(client_context, None)
+
+        self._handshakeInMemory(client_connection, server_connection)
+
+        # HAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAX
+        from OpenSSL.SSL import _lib
+        from os import O_NONBLOCK, pipe, write
+        from fcntl import F_GETFL, F_SETFL, fcntl
+        r, w = pipe()
+
+        flags = fcntl(w, F_GETFL)
+        flags = flags | O_NONBLOCK
+        fcntl(w, F_SETFL, flags)
+
+        while True:
+            try:
+                write(w, b"x")
+            except OSError as e:
+                if e.errno == EWOULDBLOCK:
+                    break
+                raise
+
+        from_ssl = _lib.BIO_new_fd(w, 0)
+        _lib.SSL_set_bio(
+            client_connection._ssl, client_connection._into_ssl, from_ssl)
+
+        self.assertRaises(WantWriteError, client_connection.shutdown)
 
 
 if __name__ == '__main__':

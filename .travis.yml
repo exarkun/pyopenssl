@@ -60,6 +60,9 @@ install:
   # to coveralls.
   - pip install coveralls coverage
 
+  # And install tools to be able to build RPMs
+  - apt-get -qq install rpm
+
 script:
   - |
     if [[ "${OPENSSL}" == "0.9.8" ]]; then

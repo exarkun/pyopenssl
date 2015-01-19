@@ -70,7 +70,7 @@ script:
   - |
     pip install -e .
   - |
-    coverage run --branch --source=OpenSSL setup.py bdist_wheel test
+    coverage run --branch --source=OpenSSL setup.py bdist_wheel bdist_rpm test
   - |
     coverage report -m
   - |
